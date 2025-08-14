@@ -1,181 +1,149 @@
-import React, { useState, useEffect } from 'react';
-import './App.css';
+import React, { useState } from "react";
+import "./App.css";
 
-// A universal UI for TurboLearn across platforms. This component
-// provides mock backend functionality while retaining the ability to call a
-// real local API once available. It features controls for recording,
-// transcription and sending prompts to the API, plus preset selection,
-// transcript and response display.
-
-const presetsMock = [
-  { id: '1', name: 'Summary' },
-  { id: '2', name: 'Outline' },
-  { id: '3', name: 'Notes' }
-];
+import {
+  startRecording,
+  pauseRecording,
+  resumeRecording,
+  stopRecording,
+  transcribeLatest,
+  importAudioFile,
+  importYoutubeAudio,
+  importPdfFile,
+  openStorageDir,
+  clearStorageDir,
+  saveApiKey,
+  readApiKey,
+  setPromptPreset,
+  getPromptPreset,
+  openQuizlet
+} from "./lib/tauri.js"; // NOTE: .js extension (not .ts)
 
 export default function App() {
-  const [sessionId, setSessionId] = useState('');
-  const [status, setStatus] = useState('');
-  const [transcript, setTranscript] = useState('');
-  const [response, setResponse] = useState('');
-  const [selectedPreset, setSelectedPreset] = useState('');
-  const [presets, setPresets] = useState([]);
-  const [loading, setLoading] = useState({
-    recording: false,
-    transcribing: false,
-    sending: false
-  });
-  const [mock, setMock] = useState(true);
+  const [sessionId, setSessionId] = useState("");
+  const [status, setStatus] = useState("");
+  const [transcript, setTranscript] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Determine the base URL for API calls. Falls back to localhost if
-  // VITE_API_BASE is not defined in the environment.
-  const [apiBase] = useState(
-    import.meta?.env?.VITE_API_BASE || 'http://127.0.0.1:17600'
-  );
 
-  // On mount, load presets either from the mock list or from the backend.
-  useEffect(() => {
-    if (mock) {
-      setPresets(presetsMock);
-    } else {
-      fetch(`${apiBase}/presets`)
-        .then((res) => res.json())
-        .then((data) => {
-          setPresets(data || []);
-        })
-        .catch(() => setPresets([]));
-    }
-  }, [mock, apiBase]);
-
-  // Starts a new recording session. Uses a mock implementation when mock mode
-  // is enabled; otherwise it calls the local API.
+  // --- Recording handlers (Tauri) ---
   const handleRecordStart = async () => {
-    setLoading((prev) => ({ ...prev, recording: true }));
-    setIsRecording(true);
-    setIsPaused(false);
-    if (mock) {
-      const id = Math.random().toString(36).substring(2, 10);
-      setSessionId(id);
-      setStatus('Recording started (mock).');
-      setLoading((prev) => ({ ...prev, recording: false }));
-      return;
-    }
+    setStatus("Starting…");
     try {
-      const res = await fetch(`${apiBase}/record/start`, {
-        method: 'POST'
-      });
-      const json = await res.json();
-      setSessionId(json.sessionId || '');
-      setStatus('Recording started.');
+      const res = await startRecording();
+      setSessionId(res?.session_id || "");
+      setIsRecording(true);
+      setIsPaused(false);
+      setStatus("Recording");
     } catch (e) {
-      setStatus('Failed to start recording.');
-    } finally {
-      setLoading((prev) => ({ ...prev, recording: false }));
+      setStatus(`Failed to start: ${e}`);
+      console.error(e);
     }
   };
 
-  // Stops the current recording session and saves the audio. When mocking
-  // this simply updates the status; otherwise it relies on the backend.
+  const handlePause = async () => {
+    if (!isRecording || isPaused) return;
+    try {
+      await pauseRecording();
+      setIsPaused(true);
+      setStatus("Paused");
+    } catch (e) {
+      setStatus(`Pause failed: ${e}`);
+      console.error(e);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!isRecording || !isPaused) return;
+    try {
+      await resumeRecording();
+      setIsPaused(false);
+      setStatus("Recording");
+    } catch (e) {
+      setStatus(`Resume failed: ${e}`);
+      console.error(e);
+    }
+  };
+
   const handleRecordStop = async () => {
-    setLoading((prev) => ({ ...prev, recording: true }));
-    setIsRecording(false);
-    setIsPaused(false);
-    if (mock) {
-      setStatus('Recording stopped (mock).');
-      setLoading((prev) => ({ ...prev, recording: false }));
-      handleTranscribe();
-      return;
-    }
+    if (!isRecording) return;
+    setStatus("Stopping…");
     try {
-      const res = await fetch(`${apiBase}/record/stop`, {
-        method: 'POST'
-      });
-      const json = await res.json();
-      setStatus(
-        json.pathWav
-          ? `Saved recording to ${json.pathWav}`
-          : 'Recording stopped.'
-      );
-      handleTranscribe();
+      const res = await stopRecording();
+      setIsRecording(false);
+      setIsPaused(false);
+      setStatus(res?.message || "Stopped");
+
+      // Auto-transcribe after stop if we have a session
+      if (sessionId) {
+        const t = await transcribeLatest(sessionId, "base");
+        setTranscript(t?.text || "");
+        setStatus("Transcription complete.");
+      } else {
+        setStatus("Stopped. (No sessionId to transcribe.)");
+      }
     } catch (e) {
-      setStatus('Failed to stop recording.');
-    } finally {
-      setLoading((prev) => ({ ...prev, recording: false }));
+      setStatus(`Stop failed: ${e}`);
+      console.error(e);
     }
   };
 
-  // Transcribes the most recent audio file. In mock mode it returns dummy
-  // content; otherwise it calls the backend to run Whisper.
-  const handleTranscribe = async () => {
-    setLoading((prev) => ({ ...prev, transcribing: true }));
-    if (mock) {
-      setTranscript('This is a mock transcript.');
-      setStatus('Transcription complete (mock).');
-      setLoading((prev) => ({ ...prev, transcribing: false }));
-      return;
+  // --- Sidebar actions (stub/demo wiring) ---
+  const onImportAudio = async () => {
+    setStatus("Import Audio: not wired to file picker yet.");
+    // When you add a file picker, pass its path to:
+    // await importAudioFile(chosenPath);
+  };
+
+  const onImportYouTube = async () => {
+    setStatus("Import YouTube Audio: not wired to URL prompt yet.");
+    // Example:
+    // const url = prompt("Paste YouTube URL:");
+    // if (url) await importYoutubeAudio(url);
+  };
+
+  const onImportPDF = async () => {
+    setStatus("Import PDF: not wired to file picker yet.");
+    // When you add a file picker, pass its path to:
+    // await importPdfFile(chosenPath);
+  };
+
+  const onApiKey = async () => {
+    const existing = await readApiKey();
+    const next = window.prompt("Enter OpenAI API key:", existing || "");
+    if (next != null) {
+      await saveApiKey(next);
+      setStatus("API key saved.");
     }
+  };
+
+  const onStorage = async () => {
+    await openStorageDir();
+    setStatus("Opened storage directory.");
+  };
+
+  const onClearStorage = async () => {
+    await clearStorageDir();
+    setStatus("Storage cleared.");
+  };
+
+  const onPromptPreset = async () => {
+    const current = await getPromptPreset();
+    const next = window.prompt("Enter prompt preset name:", current || "");
+    if (next != null) {
+      await setPromptPreset(next);
+      setStatus("Prompt preset saved.");
+    }
+  };
+
+  const onQuizlet = async () => {
     try {
-      const res = await fetch(`${apiBase}/transcribe`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'small'
-        })
-      });
-      const json = await res.json();
-      setTranscript(json.text || '');
-      setStatus('Transcription complete.');
+      await openQuizlet();
+      setStatus("Opened Quizlet.");
     } catch (e) {
-      setStatus('Failed to transcribe.');
-    } finally {
-      setLoading((prev) => ({ ...prev, transcribing: false }));
+      setStatus(`Open Quizlet failed: ${e}`);
     }
-  };
-
-  // Sends the transcript to the OpenAI API using the selected prompt preset.
-  // When mocking this returns a dummy response; otherwise it calls the backend.
-  const handleSend = async () => {
-    setLoading((prev) => ({ ...prev, sending: true }));
-    if (mock) {
-      setResponse('This is a mock response from the API.');
-      setStatus('Sent to API (mock).');
-      setLoading((prev) => ({ ...prev, sending: false }));
-      return;
-    }
-    try {
-      const res = await fetch(`${apiBase}/openai/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          promptPresetId: selectedPreset,
-          text: transcript
-        })
-      });
-      const json = await res.json();
-      setResponse(json.response || '');
-      setStatus('Received response.');
-    } catch (e) {
-      setStatus('Failed to query the API.');
-    } finally {
-      setLoading((prev) => ({ ...prev, sending: false }));
-    }
-  };
-
-  // Toggles between mock mode and real backend mode. When disabling mock,
-  // presets will be fetched from the backend on the next render.
-  const toggleMock = () => {
-    setMock((prev) => !prev);
-    setStatus('');
-    setTranscript('');
-    setResponse('');
-    setSelectedPreset('');
-  };
-
-  const handlePauseResume = () => {
-    setIsPaused(prev => !prev);
-    setStatus(isPaused ? 'Resuming...' : 'Pausing...');
   };
 
   return (
@@ -192,23 +160,28 @@ export default function App() {
       </header>
 
       <div className="content-area">
-        <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+        {/* Sidebar */}
+        <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+          <div className="sidebar-header">
+            <div className="sidebar-title">Settings</div>
+          </div>
           <nav className="menu">
-            <button className="menu-item" onClick={() => {/* TODO */}}>Import Audio</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>Import YouTube Audio</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>Import PDF</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>OpenAI API Key</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>Storage</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>Clear Storage</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>OpenAI Prompt</button>
-            <button className="menu-item" onClick={() => {/* TODO */}}>Open Quizlet</button>
+            <button className="menu-item" onClick={onImportAudio}>Import Audio</button>
+            <button className="menu-item" onClick={onImportYouTube}>Import YouTube Audio</button>
+            <button className="menu-item" onClick={onImportPDF}>Import PDF</button>
+            <button className="menu-item" onClick={onApiKey}>OpenAI API Key</button>
+            <button className="menu-item" onClick={onStorage}>Storage</button>
+            <button className="menu-item" onClick={onClearStorage}>Clear Storage</button>
+            <button className="menu-item" onClick={onPromptPreset}>OpenAI Prompt</button>
+            <button className="menu-item" onClick={onQuizlet}>Open Quizlet</button>
           </nav>
         </aside>
 
-        <div className={`content-shift ${sidebarOpen ? 'shifted' : ''}`}>
+        {/* Main area that shifts when sidebar is open */}
+        <div className={`content-shift ${sidebarOpen ? "shifted" : ""}`}>
           <div className="main-content">
-            {/* Recording controls */}
-            <div className="recording-controls grid-3">
+            {/* Recording controls (3 columns) */}
+            <div className="recording-controls">
               <button
                 onClick={handleRecordStart}
                 disabled={isRecording}
@@ -216,15 +189,25 @@ export default function App() {
               >
                 Start
               </button>
-      
-              <button
-                onClick={handlePauseResume}
-                disabled={!isRecording}
-                className="pill-btn pause-resume-btn"
-              >
-                {isPaused ? 'Resume' : 'Pause'}
-              </button>
-      
+
+              {!isPaused ? (
+                <button
+                  onClick={handlePause}
+                  disabled={!isRecording || isPaused}
+                  className="pill-btn pause-resume-btn"
+                >
+                  Pause
+                </button>
+              ) : (
+                <button
+                  onClick={handleResume}
+                  disabled={!isRecording || !isPaused}
+                  className="pill-btn pause-resume-btn"
+                >
+                  Resume
+                </button>
+              )}
+
               <button
                 onClick={handleRecordStop}
                 disabled={!isRecording}
@@ -233,7 +216,7 @@ export default function App() {
                 Stop
               </button>
             </div>
-      
+
             {/* Lecture Notes */}
             <div className="lecture-notes">
               <h2>Lecture Notes</h2>
@@ -251,18 +234,7 @@ export default function App() {
                 {transcript || "— (transcript will appear here) —"}
               </div>
             </div>
-      
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
-              <button
-                onClick={handleSend}
-                disabled={loading.sending || !transcript}
-                className="pill-btn start-btn"
-              >
-                Ask AI
-              </button>
-            </div>
-      
+
             {/* Console strip */}
             <div className="console-output">Status: {status || "Ready"}</div>
           </div>

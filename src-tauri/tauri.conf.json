@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ui",
+  "productName": "Applesauce",
   "version": "0.1.0",
-  "identifier": "app.Applesauce",
+  "identifier": "com.yourname.applesauce",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1421",
@@ -12,14 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "ui",
-        "width": 800,
-        "height": 600
+        "title": "Applesauce",
+        "width": 1000,
+        "height": 700
       }
     ],
-    "security": {
-      "csp": null
-    }
+    "security": { "csp": null }
   },
   "bundle": {
     "active": true,
