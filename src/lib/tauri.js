@@ -1,20 +1,15 @@
 // src/lib/tauri.js
-// Safe wrappers around Tauri invoke so your app doesn't crash in a web browser.
-// This file is JS-only, but structured so it can be ported to TS easily later.
+// Safe wrappers around Tauri invoke so your app won't crash in a plain browser tab.
 
-/** True when running inside a Tauri desktop window (not a plain browser tab). */
 export const isTauri =
   typeof window !== "undefined" &&
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
-/**
- * Lazy-initialized invoke function. In a browser tab, it throws a clear error.
- * In Tauri, it dynamically imports @tauri-apps/api/core and calls invoke(cmd, args).
- */
 let _cachedInvoke = null;
+
+/** Lazy-load invoke (Tauri v2). In a browser tab, throw a friendly error. */
 async function getInvoke() {
   if (!isTauri) {
-    // Throw a friendly error when someone clicks a Tauri-only button in the browser preview.
     return async () => {
       throw new Error(
         "Tauri API not available in the web preview. Run `npm run tauri dev` and use the desktop window."
@@ -22,47 +17,51 @@ async function getInvoke() {
     };
   }
   if (_cachedInvoke) return _cachedInvoke;
-
-  // Dynamically import so bundlers won't explode in the browser.
-  const { invoke } = await import("@tauri-apps/api/core");
+  const { invoke } = await import("@tauri-apps/api/core"); // v2 path
   _cachedInvoke = invoke;
   return _cachedInvoke;
 }
 
-/** Always pass an args object so future TS ports won’t complain. */
+/** Always pass an args object so future TS ports are painless. */
 async function tauriInvoke(cmd, args = {}) {
   const invoke = await getInvoke();
   return invoke(cmd, args);
 }
 
-/* -------------------- App-specific commands -------------------- */
-/* These match the command names you registered in src-tauri/src/main.rs.  */
-/* All helpers pass {} when no args are required (TS-friendly convention). */
+/* ------------------------------------------------------------------ */
+/*                App-specific commands (match Rust names)             */
+/* ------------------------------------------------------------------ */
 
-// Recording controls
-export const startRecording   = () => tauriInvoke("start_recording", {});
-export const pauseRecording   = () => tauriInvoke("pause_recording", {});
-export const resumeRecording  = () => tauriInvoke("resume_recording", {});
-export const stopRecording    = () => tauriInvoke("stop_recording", {});
+/** Recording controls (Rust: *_cmd; no struct args) */
+export const startRecording  = () => tauriInvoke("start_recording_cmd", {});
+export const pauseRecording  = () => tauriInvoke("pause_recording_cmd", {});
+export const resumeRecording = () => tauriInvoke("resume_recording_cmd", {});
+export const stopRecording   = () => tauriInvoke("stop_recording_cmd", {});
 
-// Transcription
+/** Frontend → Rust file save (Rust: save_audio_base64; NOT a struct param) */
+export const saveAudioBase64 = (base64Data, extHint) =>
+  tauriInvoke("save_audio_base64", { base64Data, extHint });
+
+/** Transcription (Rust signature: fn transcribe_latest_cmd(args: TranscribeArgs)) */
 export const transcribeLatest = (sessionId, model) =>
-  tauriInvoke("transcribe_latest", { sessionId, model });
+  tauriInvoke("transcribe_latest_cmd", {
+    args: { session_id: sessionId ?? null, model: model ?? null },
+  });
 
-// File imports (your UI decides how to collect the path/URL)
-export const importAudioFile   = (path) => tauriInvoke("import_audio_file",   { path });
-export const importYoutubeAudio= (url)  => tauriInvoke("import_youtube_audio", { url });
-export const importPdfFile     = (path) => tauriInvoke("import_pdf_file",     { path });
+/** File imports (Rust: fn ..._cmd(args: Import...Args)) */
+export const importAudioFile    = (path) => tauriInvoke("import_audio_file_cmd",    { args: { path } });
+export const importYoutubeAudio = (url)  => tauriInvoke("import_youtube_audio_cmd", { args: { url } });
+export const importPdfFile      = (path) => tauriInvoke("import_pdf_file_cmd",      { args: { path } });
 
-// Storage
-export const openStorageDir  = () => tauriInvoke("open_storage_dir", {});
-export const clearStorageDir = () => tauriInvoke("clear_storage_dir", {});
+/** Storage (Rust: *_cmd; no struct args) */
+export const openStorageDir  = () => tauriInvoke("open_storage_dir_cmd", {});
+export const clearStorageDir = () => tauriInvoke("clear_storage_dir_cmd", {});
 
-// API key / prompt
-export const saveApiKey      = (value) => tauriInvoke("save_api_key",      { value });
-export const readApiKey      = ()        => tauriInvoke("read_api_key",     {});
-export const setPromptPreset = (value) => tauriInvoke("set_prompt_preset", { value });
-export const getPromptPreset = ()        => tauriInvoke("get_prompt_preset", {});
+/** API key / prompt (Rust: fn ..._cmd(args: ...Args)) */
+export const saveApiKey      = (value) => tauriInvoke("save_api_key_cmd",       { args: { value } });
+export const readApiKey      = ()        => tauriInvoke("read_api_key_cmd",      {});
+export const setPromptPreset = (value)  => tauriInvoke("set_prompt_preset_cmd",  { args: { value } });
+export const getPromptPreset = ()        => tauriInvoke("get_prompt_preset_cmd", {});
 
-// External
-export const openQuizlet     = ()        => tauriInvoke("open_quizlet", {});
+/** External (Rust: *_cmd; no struct args) */
+export const openQuizlet     = ()        => tauriInvoke("open_quizlet_cmd", {});

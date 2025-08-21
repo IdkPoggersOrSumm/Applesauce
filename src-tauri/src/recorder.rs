@@ -39,12 +39,18 @@ impl RecorderState {
   }
 }
 
-pub fn app_data_dir() -> PathBuf {
-  // Keep same place your main.rs expects. Adjust as needed.
-  // Using %APPDATA%\Applesauce on Windows via directories crate would be nicer,
-  // but keep it deterministic for now:
-  let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-  base.join("applesauce_data")
+/// Returns our recording storage directory:
+/// - Prefer the OS-native Downloads folder: <Downloads>/ApplesauceCacheNative
+/// - Fallback to a temp dir if Downloads is unavailable
+pub fn storage_dir() -> PathBuf {
+  if let Some(mut d) = dirs::download_dir() {
+    d.push("ApplesauceCacheNative");
+    return d;
+  }
+  // Very unlikely, but if the platform has no Downloads dir:
+  let mut d = std::env::temp_dir();
+  d.push("ApplesauceCacheNative");
+  d
 }
 
 // ---- high-level helpers called by Tauri commands ----
@@ -54,10 +60,12 @@ pub fn start_recording(state: &mut RecorderState) -> Result<(String, PathBuf)> {
     return Err(anyhow!("recording already in progress"));
   }
 
-  fs::create_dir_all(app_data_dir())?;
+  // Ensure our target folder exists (Downloads/ApplesauceCacheNative).
+  let dir = storage_dir();
+  fs::create_dir_all(&dir)?;
 
   let session_id = new_session_id();
-  let wav_path = app_data_dir().join(format!("{session_id}.wav"));
+  let wav_path = dir.join(format!("{session_id}.wav"));
 
   // Channel to control the audio thread
   let (tx, rx) = unbounded::<Cmd>();
@@ -102,11 +110,12 @@ pub fn resume_recording(state: &mut RecorderState) -> Result<()> {
 
 pub fn stop_recording(state: &mut RecorderState) -> Result<PathBuf> {
   if let Some(tx) = state.tx.take() {
-    tx.send(Cmd::Stop).ok(); // we’ll ignore send error if thread already exited
+    // Ignore send error if thread already exited
+    tx.send(Cmd::Stop).ok();
   } else {
     return Err(anyhow!("no active recording"));
   }
-  // Optionally: wait a tiny moment for the thread to flush; or implement a join handle & ack.
+  // We could join the thread or wait for an ACK; for now, return the last path.
   let out = state
     .last_wav
     .clone()

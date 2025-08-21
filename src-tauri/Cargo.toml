@@ -32,3 +32,6 @@ directories = "5"
 open = "5"
 crossbeam-channel = "0.5"
 chrono = { version = "0.4", features = ["clock"] }
+base64 = "0.22.1"
+dirs = "5"
+
