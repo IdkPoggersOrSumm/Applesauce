@@ -4,10 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 1421 -State Listen -ErrorAction SilentlyContinue | % { Stop-Process -Id $_.OwningProcess -Force }\"",
     "dev": "vite --port 1421",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri dev"
   },
   "dependencies": {
     "react": "^19.1.0",
